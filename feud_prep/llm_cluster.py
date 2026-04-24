@@ -106,26 +106,45 @@ def _sort_clusters(clusters: list[Cluster], top_k: int) -> list[Cluster]:
 
 SYSTEM_BASE = """You help run a Family Feud style game from free-text survey answers about LabVIEW.
 You merge answers that mean the same thing (synonyms, typos, different phrasing).
+All answers come from ONE survey column: each spreadsheet row is one respondent; blank cells are omitted;
+comma-separated lists in a cell were already split into separate answer lines with frequencies combined.
 Output MUST be valid JSON only, no markdown.
 Use short, display-friendly labels (a few words).
-Each "members" entry must use the EXACT text string from the input (character-for-character match after the input's own trimming)."""
+Each "members" entry must use the EXACT text string from the input (character-for-character match after the input's own trimming).
+
+CRITICAL RULES:
+- NEVER create catch-all categories like "Other", "Miscellaneous", "General", or "Various".
+- If an answer does not clearly fit with any other answer, it gets its OWN cluster with a specific, descriptive label.
+- A cluster of 1 answer is perfectly fine. Label it with a clear, specific name based on what that answer is.
+- Only merge answers that genuinely mean the same thing. Do NOT force unrelated answers together."""
 
 
 def cluster_single_batch(
     answers: list[AnswerCount],
     top_k: int,
-    question_context: str,
+    survey_prompt: str,
+    prior_labels: list[str] | None = None,
 ) -> list[Cluster]:
     allowed = _build_allowed_map(answers)
+    prompt_line = survey_prompt.strip() if survey_prompt.strip() else "(header missing — infer from answers)"
     payload = {
+        "survey_prompt": prompt_line,
         "answers": [{"text": a.text, "count": a.count} for a in answers],
         "top_k": top_k,
-        "question_context": question_context,
     }
+
+    seed_section = ""
+    if prior_labels:
+        seed_section = f"""\n\nPrior cluster labels from a previous review session (use these as a starting point — 
+assign answers to these existing groups where they fit, and create new specific groups for answers that don't match):
+{json.dumps(prior_labels, ensure_ascii=False)}\n"""
+
     user = f"""Task: Group these answers into up to {top_k} clusters for the game board.
 
-Question context (may be empty): {question_context!r}
+Survey prompt (exact column header from row 1 of the spreadsheet): {prompt_line!r}
 
+The counts below aggregate every respondent in that column: multiple answers from one person and duplicate phrasing across rows are already reflected in "count".
+{seed_section}
 Input JSON:
 {json.dumps(payload, ensure_ascii=False)}
 
@@ -136,23 +155,25 @@ Rules:
 - Order clusters by total people (sum of member counts), descending.
 - Every input answer text must appear in exactly one cluster's members (use exact "text" values from input).
 - Merge duplicates of meaning; member "count" must match the input count for that text.
-- Return at most {top_k} clusters; if fewer distinct ideas exist, return fewer."""
+- Return at most {top_k} clusters; if fewer distinct ideas exist, return fewer.
+- NEVER create clusters named "Other", "Miscellaneous", "General", or any catch-all. If an answer is unique, give it its own cluster with a specific name."""
     data = _chat_json(SYSTEM_BASE, user)
     clusters = _parse_clusters_payload(data, allowed)
     clusters = _dedupe_clusters_by_member(clusters)
-    # Recover missing texts into catch-all
+    # Recover any answers the LLM missed — each gets its own specific cluster
     assigned = {m.text for c in clusters for m in c.members}
     missing = [a for a in answers if a.text not in assigned]
-    if missing:
-        clusters.append(Cluster(label="Other", members=missing))
-        clusters = _dedupe_clusters_by_member(clusters)
+    for a in missing:
+        clusters.append(Cluster(label=a.text.title(), members=[a]))
+    clusters = _dedupe_clusters_by_member(clusters)
     return _sort_clusters(clusters, top_k)
 
 
 def cluster_chunked_then_merge(
     answers: list[AnswerCount],
     top_k: int,
-    question_context: str,
+    survey_prompt: str,
+    prior_labels: list[str] | None = None,
 ) -> list[Cluster]:
     allowed = _build_allowed_map(answers)
     chunks: list[list[AnswerCount]] = []
@@ -168,7 +189,7 @@ def cluster_chunked_then_merge(
     partial: list[dict[str, Any]] = []
     for i, ch in enumerate(chunks):
         sub_k = max(top_k + 3, 12)
-        cs = cluster_single_batch(ch, sub_k, question_context)
+        cs = cluster_single_batch(ch, sub_k, survey_prompt, prior_labels=prior_labels)
         partial.append(
             {
                 "chunk_index": i,
@@ -176,12 +197,17 @@ def cluster_chunked_then_merge(
             }
         )
 
+    seed_section = ""
+    if prior_labels:
+        seed_section = f"""\nPrior cluster labels to prefer: {json.dumps(prior_labels, ensure_ascii=False)}\n"""
+
+    _p = survey_prompt.strip() or "(unknown)"
     merge_user = f"""You previously clustered subsets of the same survey column. Now merge into one final list for the game.
 
-Question context: {question_context!r}
+Survey prompt (column header): {_p!r}
 
 Target: at most {top_k} clusters, ordered by total people descending.
-
+{seed_section}
 Partial results JSON:
 {json.dumps({"partial": partial}, ensure_ascii=False)}
 
@@ -191,25 +217,27 @@ Return JSON:
 Rules:
 - Every text in the partial results must appear exactly once in your output (same exact spelling as in partial).
 - Merge clusters that represent the same real-world answer.
-- Member "count" must match the original count for that text (from partial)."""
+- Member "count" must match the original count for that text (from partial).
+- NEVER create clusters named "Other", "Miscellaneous", "General", or any catch-all. Unique answers get their own specifically-named cluster."""
     data = _chat_json(SYSTEM_BASE, merge_user)
     clusters = _parse_clusters_payload(data, allowed)
     clusters = _dedupe_clusters_by_member(clusters)
     assigned = {m.text for c in clusters for m in c.members}
     missing = [allowed[t] for t in allowed if t not in assigned]
-    if missing:
-        clusters.append(Cluster(label="Other", members=missing))
-        clusters = _dedupe_clusters_by_member(clusters)
+    for a in missing:
+        clusters.append(Cluster(label=a.text.title(), members=[a]))
+    clusters = _dedupe_clusters_by_member(clusters)
     return _sort_clusters(clusters, top_k)
 
 
 def cluster_answers(
     answers: list[AnswerCount],
     top_k: int = 10,
-    question_context: str = "",
+    survey_prompt: str = "",
+    prior_labels: list[str] | None = None,
 ) -> list[Cluster]:
     if not answers:
         return []
     if len(answers) <= CHUNK_SIZE:
-        return cluster_single_batch(answers, top_k, question_context)
-    return cluster_chunked_then_merge(answers, top_k, question_context)
+        return cluster_single_batch(answers, top_k, survey_prompt, prior_labels=prior_labels)
+    return cluster_chunked_then_merge(answers, top_k, survey_prompt, prior_labels=prior_labels)

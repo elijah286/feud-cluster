@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LabVIEW Family Feud — Survey Clustering</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- Header -->
+<header class="app-header">
+  <h1>LabVIEW Family Feud</h1>
+  <div class="header-actions">
+    <span id="saveStatus" class="save-status saved hidden"></span>
+    <button id="btnExport" class="btn btn-success hidden" onclick="exportFeud()">Export JSON</button>
+    <button id="btnBack" class="btn hidden" onclick="goHome()">← Back</button>
+  </div>
+</header>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Loading overlay -->
+<div id="loadingOverlay" class="loading-overlay hidden">
+  <div class="spinner"></div>
+  <p id="loadingMsg">Loading...</p>
+</div>
+
+<!-- Page: Landing -->
+<div id="pageLanding" class="container">
+  <div class="landing">
+    <h2>Survey Clustering Tool</h2>
+    <p>Group free-text survey answers into categories for the Family Feud game board.</p>
+    <div class="landing-grid">
+      <div class="landing-card" onclick="document.getElementById('csvInput').click()">
+        <h3>📄 Upload CSV</h3>
+        <p>Upload a new survey CSV to cluster answers</p>
+        <input type="file" id="csvInput" accept=".csv" onchange="handleUpload(this)">
+      </div>
+      <div class="landing-card" id="openRunCard">
+        <h3>📂 Open Saved Run</h3>
+        <p>Resume editing a previously saved session</p>
+      </div>
+    </div>
+    <div id="runsList" class="runs-list hidden"></div>
+  </div>
+
+  <!-- Upload config (shown after file selected) -->
+  <div id="uploadConfig" class="hidden" style="max-width: 500px; margin: 24px auto;">
+    <div class="settings-bar" style="flex-direction: column; align-items: stretch; gap: 12px;">
+      <p style="font-weight: 600;" id="uploadFileName"></p>
+      <div class="flex items-center gap-2">
+        <label for="topKInput">Max clusters per prompt:</label>
+        <input type="number" id="topKInput" value="10" min="4" max="20" style="width: 60px;">
+      </div>
+      <div>
+        <label for="ignoreInput">Ignore answers (comma-separated):</label>
+        <input type="text" id="ignoreInput" value="n/a,na,none" style="width: 100%; margin-top: 4px;">
+      </div>
+      <div id="seedOption" class="hidden">
+        <label><input type="checkbox" id="useSeedCheck" checked> Use prior cluster labels as guidance for re-clustering</label>
+      </div>
+      <button class="btn btn-primary" onclick="runClustering()" style="align-self: flex-start;">Run LLM Clustering</button>
+    </div>
+  </div>
+</div>
+
+<!-- Page: Review -->
+<div id="pageReview" class="container review-page hidden"></div>
+
+<!-- Move bar (floating bottom bar) -->
+<div id="moveBar" class="move-bar">
+  <span class="move-info"><strong id="moveCount">0</strong> answer(s) selected</span>
+  <select id="moveDest"></select>
+  <button class="btn btn-primary btn-sm" onclick="moveSelected()">Move</button>
+  <button class="btn btn-sm" onclick="clearSelection()">Cancel</button>
+</div>
+
+<!-- Merge modal -->
+<div id="mergeModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h3>Merge Clusters</h3>
+    <p class="text-sm text-muted mb-4">All answers will be combined into one cluster. Choose the label to keep:</p>
+    <div id="mergeLabelOptions"></div>
+    <div>
+      <label class="text-sm">Or enter a custom label:</label>
+      <input type="text" id="mergeCustomLabel" style="width: 100%; padding: 6px 10px; margin-top: 4px; border: 1px solid var(--border); border-radius: 4px;">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeMergeModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmMerge()">Merge</button>
+    </div>
+  </div>
+</div>
+
+<!-- Split modal -->
+<div id="splitModal" class="modal-backdrop hidden">
+  <div class="modal">
+    <h3>Split Cluster</h3>
+    <p class="text-sm text-muted mb-2">Select answers to move to a new cluster:</p>
+    <div id="splitAnswerList" style="max-height: 300px; overflow-y: auto; margin-bottom: 12px;"></div>
+    <div>
+      <label class="text-sm">Label for new cluster:</label>
+      <input type="text" id="splitNewLabel" style="width: 100%; padding: 6px 10px; margin-top: 4px; border: 1px solid var(--border); border-radius: 4px;">
+    </div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeSplitModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmSplit()">Split</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

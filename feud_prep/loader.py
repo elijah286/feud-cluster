@@ -7,6 +7,14 @@ import pandas as pd
 
 from feud_prep.models import AnswerCount
 
+# Spreadsheet layout: columns A–E are metadata (id, times, email, name); first survey prompt is column F (index 5).
+METADATA_COLUMN_COUNT = 5
+
+
+def split_cell_on_commas(text: str) -> list[str]:
+    """Split one cell on commas; each non-empty trimmed segment is its own answer."""
+    return [p.strip() for p in text.split(",") if p.strip()]
+
 
 def load_survey_csv(path_or_buffer: str | io.BytesIO | io.StringIO, encoding: str = "utf-8") -> pd.DataFrame:
     if isinstance(path_or_buffer, str):
@@ -16,22 +24,11 @@ def load_survey_csv(path_or_buffer: str | io.BytesIO | io.StringIO, encoding: st
     return pd.read_csv(path_or_buffer, encoding=encoding, dtype=str, keep_default_na=False)
 
 
-def filter_column_names(
-    columns: list[str],
-    skip_first: int = 0,
-    exclude_substrings: list[str] | None = None,
-) -> list[str]:
-    exclude_substrings = [s.strip().lower() for s in (exclude_substrings or []) if s.strip()]
-    names = list(columns)
-    if skip_first > 0:
-        names = names[skip_first:]
-    out: list[str] = []
-    for c in names:
-        low = c.lower()
-        if any(ex in low for ex in exclude_substrings):
-            continue
-        out.append(c)
-    return out
+def prompt_column_headers(columns: list[str]) -> list[str]:
+    """Return header names for survey prompt columns (from column F onward)."""
+    if len(columns) <= METADATA_COLUMN_COUNT:
+        return []
+    return list(columns[METADATA_COLUMN_COUNT:])
 
 
 def extract_raw_answers(
@@ -39,6 +36,11 @@ def extract_raw_answers(
     column: str,
     ignore_exact: set[str] | None = None,
 ) -> list[str]:
+    """Pull free-text answers from one column.
+
+    Respondents may put several answers in one cell separated by commas (e.g. ``a, b, c``).
+    Each comma-separated segment is treated as a separate answer for counting and clustering.
+    """
     ignore_exact = ignore_exact or set()
     ignore_norm = {s.strip().lower() for s in ignore_exact if s.strip()}
     if column not in df.columns:
@@ -49,9 +51,13 @@ def extract_raw_answers(
         s = v.strip()
         if not s or s.lower() in ("nan", "none", "null"):
             continue
-        if s.lower() in ignore_norm:
+        phrases = split_cell_on_commas(s)
+        if not phrases:
             continue
-        out.append(s)
+        for phrase in phrases:
+            if phrase.lower() in ignore_norm:
+                continue
+            out.append(phrase)
     return out
 
 

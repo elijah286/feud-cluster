@@ -57,7 +57,6 @@ class RunArtifact:
     n_cells_non_empty: int
     n_unique_texts: int
     skip_first_columns: int = 0
-    exclude_name_substrings: list[str] = field(default_factory=list)
     ignore_exact_answers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -70,7 +69,6 @@ class RunArtifact:
             "n_cells_non_empty": self.n_cells_non_empty,
             "n_unique_texts": self.n_unique_texts,
             "skip_first_columns": self.skip_first_columns,
-            "exclude_name_substrings": self.exclude_name_substrings,
             "ignore_exact_answers": self.ignore_exact_answers,
         }
 
@@ -86,7 +84,6 @@ class RunArtifact:
             n_cells_non_empty=int(d.get("n_cells_non_empty", 0)),
             n_unique_texts=int(d.get("n_unique_texts", 0)),
             skip_first_columns=int(d.get("skip_first_columns", 0)),
-            exclude_name_substrings=list(d.get("exclude_name_substrings") or []),
             ignore_exact_answers=list(d.get("ignore_exact_answers") or []),
         )
 
