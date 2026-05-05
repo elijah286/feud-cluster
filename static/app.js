@@ -197,8 +197,15 @@ async function runClustering() {
   try {
     const resp = await fetch("/api/upload-and-cluster", { method: "POST", body: form });
     if (!resp.ok) {
-      const err = await resp.json();
-      throw new Error(err.error || "Clustering failed");
+      let errMsg = "Clustering failed";
+      try {
+        const err = await resp.json();
+        errMsg = err.error || (err.details ? err.details.join("; ") : errMsg);
+      } catch {
+        const text = await resp.text().catch(() => "");
+        errMsg = `Server error (${resp.status})${text ? ": " + text.slice(0, 200) : ""}`;
+      }
+      throw new Error(errMsg);
     }
     appState.currentRun = await resp.json();
     appState.dirty = false;

@@ -13,7 +13,7 @@ CHUNK_SIZE = 45
 
 
 def _client() -> OpenAI:
-    key = os.environ.get("OPENAI_API_KEY")
+    key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     if not key:
         raise RuntimeError("OPENAI_API_KEY is not set. Add it to .env or the environment.")
     return OpenAI(api_key=key)

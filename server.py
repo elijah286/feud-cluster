@@ -35,6 +35,14 @@ app = Flask(__name__, static_folder=str(STATIC_DIR), static_url_path="/static")
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50 MB upload limit
 
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Return JSON for any unhandled exception so the frontend always gets parseable errors."""
+    import traceback
+    traceback.print_exc()
+    return jsonify({"error": str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
