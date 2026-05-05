@@ -250,6 +250,8 @@ def upload_and_cluster():
                 "clusters": clusters_to_state(clusters),
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             errors.append(f"{column}: {e}")
 
     if not by_column:
