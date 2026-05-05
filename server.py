@@ -188,7 +188,18 @@ def latest_run():
     if data is None:
         return jsonify({"error": "Run not found"}), 404
     payload = normalize_run_file(data)
-    return jsonify(bundle_to_api_response(payload))
+    resp = bundle_to_api_response(payload)
+    resp["saved_as"] = latest_filename
+    return jsonify(resp)
+
+
+@app.get("/api/runs/latest/version")
+def latest_run_version():
+    """Return just the version (updated_at) of the latest run — lightweight poll endpoint."""
+    info = run_db.get_latest_version()
+    if not info:
+        return jsonify({"error": "No runs"}), 404
+    return jsonify(info)
 
 
 @app.get("/api/runs/<filename>")
@@ -333,7 +344,8 @@ def save_run():
     }
 
     stem = slugify(Path(source_file).stem if source_file else "run")
-    save_filename = f"manual_{utc_now_iso().replace(':', '')}_{stem}_all_prompts.json"
+    # Update in-place if the client tells us which file it's editing
+    save_filename = data.get("saved_as") or f"manual_{utc_now_iso().replace(':', '')}_{stem}_all_prompts.json"
     run_db.upsert_run(save_filename, bundle)
 
     return jsonify({"saved_as": save_filename})

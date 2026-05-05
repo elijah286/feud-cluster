@@ -53,8 +53,16 @@ def init_db() -> None:
                     created_at  TEXT NOT NULL DEFAULT '',
                     n_prompts   INTEGER NOT NULL DEFAULT 0,
                     data        JSONB NOT NULL,
-                    inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                    inserted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
+            """)
+            # Add updated_at if missing (existing tables)
+            cur.execute("""
+                DO $$ BEGIN
+                    ALTER TABLE runs ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+                EXCEPTION WHEN duplicate_column THEN NULL;
+                END $$;
             """)
     _db_ready = True
 
@@ -69,13 +77,14 @@ def upsert_run(filename: str, data: dict) -> None:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO runs (filename, source_file, created_at, n_prompts, data)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO runs (filename, source_file, created_at, n_prompts, data, updated_at)
+                VALUES (%s, %s, %s, %s, %s, now())
                 ON CONFLICT (filename) DO UPDATE
                     SET source_file = EXCLUDED.source_file,
                         created_at  = EXCLUDED.created_at,
                         n_prompts   = EXCLUDED.n_prompts,
-                        data        = EXCLUDED.data;
+                        data        = EXCLUDED.data,
+                        updated_at  = now();
                 """,
                 (filename, source_file, created_at, n_prompts, json.dumps(data)),
             )
@@ -110,6 +119,20 @@ def delete_run(filename: str) -> bool:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM runs WHERE filename = %s", (filename,))
             return cur.rowcount > 0
+
+
+def get_latest_version() -> dict | None:
+    """Return filename + updated_at for the most recently updated run."""
+    _ensure_db()
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT filename, updated_at FROM runs ORDER BY updated_at DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {"filename": row[0], "version": row[1].isoformat()}
 
 
 def bulk_upsert_runs(items: list[tuple[str, dict]]) -> int:

@@ -11,6 +11,9 @@ let appState = {
   mergeState: null,       // { promptIdx, clusterIndices: [] }
   splitState: null,       // { promptIdx, clusterIdx }
   dragState: null,        // { promptIdx, clusterIdx, text }
+  savedAs: null,          // filename of the current run in the DB
+  lastKnownVersion: null, // updated_at timestamp for change detection
+  justSaved: false,       // flag to skip refetch after own save
 };
 
 // ── Helpers ──────────────────────────────────────────────────────
@@ -124,10 +127,13 @@ async function loadLatestRun() {
     const resp = await fetch("/api/runs/latest");
     if (resp.ok) {
       appState.currentRun = await resp.json();
+      appState.savedAs = appState.currentRun.saved_as || null;
       appState.dirty = false;
       renderReview();
       showPage("review");
       hideLoading();
+      fetchVersion();
+      startSync();
       return;
     }
   } catch (e) {
@@ -182,9 +188,12 @@ async function openRun(filename) {
     const resp = await fetch(`/api/runs/${encodeURIComponent(filename)}`);
     if (!resp.ok) throw new Error(await resp.text());
     appState.currentRun = await resp.json();
+    appState.savedAs = filename;
     appState.dirty = false;
     renderReview();
     showPage("review");
+    fetchVersion();
+    startSync();
     toast("Run loaded", "success");
   } catch (e) {
     toast("Failed to load run: " + e.message, "error");
@@ -246,11 +255,15 @@ async function runClustering() {
       throw new Error(errMsg);
     }
     appState.currentRun = await resp.json();
+    appState.savedAs = appState.currentRun.saved_as || null;
     appState.dirty = false;
     document.getElementById("uploadConfig").classList.add("hidden");
     renderReview();
     showPage("review");
-    toast(`Clustered ${Object.keys(appState.currentRun.prompts).length} prompt(s). Saved as ${appState.currentRun.saved_as}`, "success");
+    toast(`Clustered ${Object.keys(appState.currentRun.prompts).length} prompt(s).`, "success");
+    // Fetch version so polling knows the baseline
+    fetchVersion();
+    startSync();
   } catch (e) {
     toast("Clustering failed: " + e.message, "error");
   }
@@ -269,13 +282,19 @@ async function autoSave() {
   el.className = "save-status saving";
   el.classList.remove("hidden");
   try {
+    const payload = { ...appState.currentRun };
+    if (appState.savedAs) payload.saved_as = appState.savedAs;
     const resp = await fetch("/api/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(appState.currentRun),
+      body: JSON.stringify(payload),
     });
     if (!resp.ok) throw new Error(await resp.text());
+    const result = await resp.json();
+    if (result.saved_as) appState.savedAs = result.saved_as;
+    appState.justSaved = true;
     markSaved();
+    fetchVersion();
   } catch (e) {
     el.textContent = "Save failed";
     el.className = "save-status unsaved";
@@ -748,6 +767,69 @@ function confirmSplit() {
   markDirty();
   renderReview();
   toast(`Split ${goMembers.length} answer(s) into "${newLabel}"`, "success");
+}
+
+// ── Real-time sync ───────────────────────────────────────────────
+
+let _syncInterval = null;
+
+async function fetchVersion() {
+  try {
+    const resp = await fetch("/api/runs/latest/version");
+    if (resp.ok) {
+      const info = await resp.json();
+      appState.lastKnownVersion = info.version;
+    }
+  } catch { /* ignore */ }
+}
+
+function startSync() {
+  stopSync();
+  _syncInterval = setInterval(pollForChanges, 2000);
+}
+
+function stopSync() {
+  if (_syncInterval) {
+    clearInterval(_syncInterval);
+    _syncInterval = null;
+  }
+}
+
+async function pollForChanges() {
+  if (!appState.currentRun) return;
+  // Don't poll while we're in the middle of saving
+  if (_saving) return;
+  try {
+    const resp = await fetch("/api/runs/latest/version");
+    if (!resp.ok) return;
+    const info = await resp.json();
+    if (appState.lastKnownVersion && info.version !== appState.lastKnownVersion) {
+      // Version changed
+      if (appState.justSaved) {
+        // It was our own save — just update the version and skip refetch
+        appState.justSaved = false;
+        appState.lastKnownVersion = info.version;
+        return;
+      }
+      // Someone else changed it — refetch
+      appState.lastKnownVersion = info.version;
+      await refetchLatest();
+    }
+  } catch { /* network blip — ignore */ }
+}
+
+async function refetchLatest() {
+  try {
+    const resp = await fetch("/api/runs/latest");
+    if (!resp.ok) return;
+    const data = await resp.json();
+    appState.currentRun = data;
+    appState.savedAs = data.saved_as || appState.savedAs;
+    appState.dirty = false;
+    clearSelection();
+    renderReview();
+    toast("Updated — a collaborator made changes", "info");
+  } catch { /* ignore */ }
 }
 
 // ── Utility ──────────────────────────────────────────────────────
