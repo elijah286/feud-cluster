@@ -177,6 +177,20 @@ def list_runs():
     return jsonify(run_db.list_runs())
 
 
+@app.get("/api/runs/latest")
+def latest_run():
+    """Load the most recently saved run."""
+    rows = run_db.list_runs()
+    if not rows:
+        return jsonify({"error": "No runs found"}), 404
+    latest_filename = rows[0]["filename"]
+    data = run_db.load_run(latest_filename)
+    if data is None:
+        return jsonify({"error": "Run not found"}), 404
+    payload = normalize_run_file(data)
+    return jsonify(bundle_to_api_response(payload))
+
+
 @app.get("/api/runs/<filename>")
 def load_run(filename: str):
     """Load a saved run by filename."""

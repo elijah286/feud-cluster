@@ -13,13 +13,14 @@
   <h1>LabVIEW Family Feud</h1>
   <div class="header-actions">
     <span id="saveStatus" class="save-status saved hidden"></span>
+    <button id="btnUploadMore" class="btn hidden" onclick="showUploadPanel()">+ Upload New Answers</button>
     <button id="btnExport" class="btn btn-success hidden" onclick="exportFeud()">Export JSON</button>
     <button id="btnBack" class="btn hidden" onclick="goHome()">← Back</button>
   </div>
 </header>
 
 <!-- Toast -->
-<div id="toast" class="toast"></div>
+<div id="toast" class="toast"><span id="toastMsg"></span><button id="toastDismiss" class="toast-dismiss" onclick="dismissToast()">&times;</button></div>
 
 <!-- Loading overlay -->
 <div id="loadingOverlay" class="loading-overlay hidden">

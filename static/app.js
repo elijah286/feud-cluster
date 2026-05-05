@@ -17,10 +17,19 @@ let appState = {
 
 function toast(msg, type = "info") {
   const el = document.getElementById("toast");
-  el.textContent = msg;
+  document.getElementById("toastMsg").textContent = msg;
   el.className = `toast ${type} visible`;
   clearTimeout(el._timer);
-  el._timer = setTimeout(() => el.classList.remove("visible"), 3500);
+  // Errors stay until dismissed; info/success auto-hide after 3.5s
+  if (type !== "error") {
+    el._timer = setTimeout(() => el.classList.remove("visible"), 3500);
+  }
+}
+
+function dismissToast() {
+  const el = document.getElementById("toast");
+  clearTimeout(el._timer);
+  el.classList.remove("visible");
 }
 
 function showLoading(msg = "Loading...") {
@@ -75,6 +84,7 @@ function showPage(page) {
   document.getElementById("pageReview").classList.toggle("hidden", page !== "review");
   document.getElementById("btnExport").classList.toggle("hidden", page !== "review");
   document.getElementById("btnBack").classList.toggle("hidden", page !== "review");
+  document.getElementById("btnUploadMore").classList.toggle("hidden", page !== "review");
   const statusEl = document.getElementById("saveStatus");
   if (page === "review") {
     statusEl.textContent = "\u2713 Saved";
@@ -84,6 +94,13 @@ function showPage(page) {
     document.getElementById("moveBar").classList.remove("visible");
     statusEl.classList.add("hidden");
   }
+}
+
+function showUploadPanel() {
+  // Switch to landing but keep the current run for seed clusters
+  showPage("landing");
+  document.getElementById("uploadConfig").classList.add("hidden");
+  document.getElementById("seedOption").classList.remove("hidden");
 }
 
 function goHome() {
@@ -100,6 +117,27 @@ function goHome() {
 }
 
 // ── Landing page ─────────────────────────────────────────────────
+
+async function loadLatestRun() {
+  showLoading("Loading latest session...");
+  try {
+    const resp = await fetch("/api/runs/latest");
+    if (resp.ok) {
+      appState.currentRun = await resp.json();
+      appState.dirty = false;
+      renderReview();
+      showPage("review");
+      hideLoading();
+      return;
+    }
+  } catch (e) {
+    console.error("Failed to load latest run:", e);
+  }
+  // No run found — show landing page
+  hideLoading();
+  showPage("landing");
+  loadRunsList();
+}
 
 async function loadRunsList() {
   try {
@@ -726,8 +764,7 @@ function escAttr(s) {
 // ── Init ─────────────────────────────────────────────────────────
 
 document.addEventListener("DOMContentLoaded", () => {
-  showPage("landing");
-  loadRunsList();
+  loadLatestRun();
 
   // Event delegation for answer tags (avoids inline onclick with special chars)
   document.addEventListener("click", (e) => {
