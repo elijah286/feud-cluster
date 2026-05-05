@@ -351,8 +351,11 @@ def _migrate_json_runs() -> None:
 
 
 with app.app_context():
-    run_db.init_db()
-    _migrate_json_runs()
+    try:
+        run_db.init_db()
+        _migrate_json_runs()
+    except Exception as exc:
+        print(f"[startup] DB init warning (will retry on first request): {exc}")
 
 
 if __name__ == "__main__":

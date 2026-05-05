@@ -30,8 +30,19 @@ def _conn() -> Generator:
         conn.close()
 
 
+_db_ready = False
+
+
+def _ensure_db() -> None:
+    """Lazy init: create table on first use if not done at startup."""
+    global _db_ready
+    if not _db_ready:
+        init_db()
+
+
 def init_db() -> None:
     """Create the runs table if it doesn't exist."""
+    global _db_ready
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -45,10 +56,12 @@ def init_db() -> None:
                     inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
             """)
+    _db_ready = True
 
 
 def upsert_run(filename: str, data: dict) -> None:
     """Insert or update a run by filename."""
+    _ensure_db()
     source_file = data.get("source_file", "")
     created_at = data.get("created_at", "")
     n_prompts = len(data.get("prompts", {}))
@@ -70,6 +83,7 @@ def upsert_run(filename: str, data: dict) -> None:
 
 def list_runs() -> list[dict[str, Any]]:
     """Return summary rows for every run, newest first."""
+    _ensure_db()
     with _conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(
@@ -81,6 +95,7 @@ def list_runs() -> list[dict[str, Any]]:
 
 def load_run(filename: str) -> dict | None:
     """Load a single run's full JSON data by filename. Returns None if not found."""
+    _ensure_db()
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT data FROM runs WHERE filename = %s", (filename,))
@@ -90,6 +105,7 @@ def load_run(filename: str) -> dict | None:
 
 def delete_run(filename: str) -> bool:
     """Delete a run by filename. Returns True if a row was deleted."""
+    _ensure_db()
     with _conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM runs WHERE filename = %s", (filename,))
@@ -98,6 +114,7 @@ def delete_run(filename: str) -> bool:
 
 def bulk_upsert_runs(items: list[tuple[str, dict]]) -> int:
     """Insert/update many runs in a single connection. Returns count of rows upserted."""
+    _ensure_db()
     if not items:
         return 0
     with _conn() as conn:
