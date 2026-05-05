@@ -162,6 +162,8 @@ function handleUpload(input) {
   appState.selectedFile = file;
   document.getElementById("uploadFileName").textContent = `File: ${file.name}`;
   document.getElementById("uploadConfig").classList.remove("hidden");
+  // Reset so re-selecting the same file triggers onchange again
+  input.value = "";
 
   // If there's an existing run with cluster labels, offer seeding
   if (appState.currentRun) {
