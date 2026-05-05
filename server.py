@@ -21,6 +21,7 @@ from feud_prep.loader import (
 )
 from feud_prep.llm_cluster import cluster_answers
 from feud_prep.models import AnswerCount, Cluster, RunArtifact, utc_now_iso
+import db as run_db
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 RUNS_DIR = PROJECT_ROOT / "runs"
@@ -164,33 +165,17 @@ def index():
 
 @app.get("/api/runs")
 def list_runs():
-    """List saved run files."""
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    runs = []
-    for p in sorted(RUNS_DIR.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            payload = normalize_run_file(data)
-            n_prompts = len(payload.get("prompts", {}))
-            runs.append({
-                "filename": p.name,
-                "source_file": payload.get("source_file", ""),
-                "created_at": payload.get("created_at", ""),
-                "n_prompts": n_prompts,
-            })
-        except Exception:
-            runs.append({"filename": p.name, "source_file": "", "created_at": "", "n_prompts": 0})
-    return jsonify(runs)
+    """List saved runs from the database."""
+    return jsonify(run_db.list_runs())
 
 
 @app.get("/api/runs/<filename>")
 def load_run(filename: str):
     """Load a saved run by filename."""
-    safe = Path(filename).name  # prevent path traversal
-    path = RUNS_DIR / safe
-    if not path.exists():
+    safe = Path(filename).name  # sanitise
+    data = run_db.load_run(safe)
+    if data is None:
         return jsonify({"error": "Run not found"}), 404
-    data = json.loads(path.read_text(encoding="utf-8"))
     payload = normalize_run_file(data)
     return jsonify(bundle_to_api_response(payload))
 
@@ -282,14 +267,13 @@ def upload_and_cluster():
         "prompts": {col: row["artifact"] for col, row in by_column.items()},
     }
 
-    # Auto-save
+    # Auto-save to database
     stem = slugify(source_name) if source_name else "run"
-    out_path = RUNS_DIR / f"{created.replace(':', '')}_{stem}_all_prompts.json"
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(bundle, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_filename = f"{created.replace(':', '')}_{stem}_all_prompts.json"
+    run_db.upsert_run(save_filename, bundle)
 
     response = bundle_to_api_response(bundle)
-    response["saved_as"] = out_path.name
+    response["saved_as"] = save_filename
     if errors:
         response["errors"] = errors
     return jsonify(response)
@@ -325,11 +309,10 @@ def save_run():
     }
 
     stem = slugify(Path(source_file).stem if source_file else "run")
-    out_path = RUNS_DIR / f"manual_{utc_now_iso().replace(':', '')}_{stem}_all_prompts.json"
-    RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(bundle, indent=2, ensure_ascii=False), encoding="utf-8")
+    save_filename = f"manual_{utc_now_iso().replace(':', '')}_{stem}_all_prompts.json"
+    run_db.upsert_run(save_filename, bundle)
 
-    return jsonify({"saved_as": out_path.name})
+    return jsonify({"saved_as": save_filename})
 
 
 @app.post("/api/export")
@@ -350,5 +333,28 @@ def export_feud():
     return jsonify(export)
 
 
+def _migrate_json_runs() -> None:
+    """One-time migration: import any local JSON run files into the database (batched)."""
+    if not RUNS_DIR.is_dir():
+        return
+    items: list[tuple[str, dict]] = []
+    for p in sorted(RUNS_DIR.glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            bundle = normalize_run_file(data)
+            items.append((p.name, bundle))
+        except Exception as exc:
+            print(f"[migrate] skipping {p.name}: {exc}")
+    if items:
+        n = run_db.bulk_upsert_runs(items)
+        print(f"[migrate] {n} runs imported to database.")
+
+
+with app.app_context():
+    run_db.init_db()
+    _migrate_json_runs()
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5050, use_reloader=False)
+    port = int(os.environ.get("PORT", 5050))
+    app.run(debug=True, host="0.0.0.0", port=port, use_reloader=False)
